@@ -6,8 +6,16 @@ import requests, time
 from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 
-
+# config
 CSV_FILE = "cullen_diamonds.csv"
+OUTPUT_CSV = "cullen_cert2_diamonds.csv"
+MAX_WORKERS = 10
+CPU_LIMIT = 80
+
+detector = cv2.QRCodeDetector()
+session = requests.Session()
+session.mount("https://", HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS))
+
 URL = "https://api.cullenjewellery.com/api/stone_preference_data/feed"
 
 ua = UserAgent()
@@ -19,6 +27,7 @@ HEADERS = {
     "referer": "https://cullenjewellery.com/",
     "user-agent": ua.random,
 }
+
 
 BASE_FILTER = {"filter":
     {"type":"diamond",
@@ -45,6 +54,122 @@ FIELDS = [
     "colour_rank","colour_intensity","clarity","clarity_rank","polish",
     "symm","culet","lab","certificate_number"
 ]
+
+
+def wait_for_cpu():
+    while psutil.cpu_percent(interval=1) > CPU_LIMIT:
+        time.sleep(2)
+
+
+def get_certificate(diamond_id):
+    try:
+        url = f"https://diamonds.cullenjewellery.com/{diamond_id}/cert.jpeg"
+        r = session.get(url, timeout=10)
+        if r.status_code != 200:
+            return diamond_id, None
+
+        img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_GRAYSCALE)
+        text, _, _ = detector.detectAndDecode(img)
+
+        return diamond_id, text.split("=")[-1] if text else None
+    except:
+        return diamond_id, None
+
+
+# def process_certificates():
+#     headers=["id",
+#             "price",
+#             "dimensions",
+#             "carat",
+#             "length",
+#             "width",
+#             "depth",
+#             "table",
+#             "dw_ratio",
+#             "lw_ratio",
+#             "tw_ratio",
+#             "is_wide",
+#             "shape",
+#             "cut",
+#             "colour",
+#             "colour_rank",
+#             "colour_intensity",
+#             "clarity",
+#             "clarity_rank",
+#             "polish",
+#             "symm",
+#             "culet",
+#             "lab",
+#             "certificate_number"]
+#     df = pd.read_csv(CSV_FILE,low_memory=False)
+#     if "certificate_number" not in df.columns:
+#         df["certificate_number"] = pd.NA
+#     df["certificate_number"] = (
+#         df["certificate_number"]
+#         .replace(["", "nan", "None", None], pd.NA)
+#     )
+
+#     pending_df = df[df["certificate_number"].isna()]
+
+#     ids = pending_df["id"].astype(str).tolist()
+
+#     batch = 20
+
+#     with ThreadPoolExecutor(MAX_WORKERS) as pool:
+#         for i in range(0, len(ids), batch):
+#             wait_for_cpu()
+
+#             chunk = ids[i:i+batch]
+#             results = dict(pool.map(get_certificate, chunk))
+
+#             out = df[df["id"].astype(str).isin(chunk)].copy()
+#             out["certificate_number"] = out["id"].astype(str).map(results)
+#             out.to_csv(CSV_FILE, header=headers, index=False)
+
+#             print(f"Batch {i//batch+1} completed")
+
+def process_certificates():
+    print("\n Running certificate scanner...")
+
+    
+    df = pd.read_csv(CSV_FILE, dtype=str)
+
+    if "certificate_number" not in df.columns:
+        df["certificate_number"] = pd.NA
+
+    # Normalize empty values
+    df["certificate_number"] = (
+        df["certificate_number"]
+        .replace(["", "nan", "None", None], pd.NA)
+    )
+
+    # Only diamonds missing cert
+    pending = df[df["certificate_number"].isna()]
+    ids = pending["id"].astype(str).tolist()
+
+    print("Pending certificates:", len(ids))
+
+    if not ids:
+        return
+
+    batch = len(ids)
+
+    for i in range(0, len(ids), batch):
+        wait_for_cpu()
+
+        chunk = ids[i:i+batch]
+
+        with ThreadPoolExecutor(MAX_WORKERS) as pool:
+            results = dict(pool.map(get_certificate, chunk))
+
+        # Update in dataframe
+        for did, cert in results.items():
+            df.loc[df["id"].astype(str) == did, "certificate_number"] = cert
+
+        # Save progress after every batch (crash safe)
+        df.to_csv(CSV_FILE, index=False)
+
+        print(f"Batch {i//batch + 1} done")
 
 
 def load_existing_ids():
@@ -104,91 +229,87 @@ def fetch_all_diamonds():
     existing_ids = load_existing_ids()
     file_exists = os.path.exists(CSV_FILE)
 
-    with open(CSV_FILE, "a" if file_exists else "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDS)
-        if not file_exists:
-            writer.writeheader()
+    # with open(CSV_FILE, "a" if file_exists else "w", newline="", encoding="utf-8") as f:
+    #     writer = csv.DictWriter(f, fieldnames=FIELDS)
+    #     if not file_exists:
+    #         writer.writeheader()
 
-        start = 0
-        page = 1
+    start = 0
+    page = 1
 
-        while True:
-            payload = BASE_FILTER.copy()
-            payload["start"] = start
+    while True:
+        payload = BASE_FILTER.copy()
+        payload["start"] = start
 
-            r = session.post(URL, headers=HEADERS, data=json.dumps(payload))
-            if r.status_code != 200:
-                print("Blocked, retrying...")
-                time.sleep(15)
-                continue
-
-            stones = r.json().get("stones", [])
-            if not stones:
-                print("Finished downloading.")
-                break
-
-            inserted = save_diamonds(stones, writer, existing_ids)
-
-            print(f"Page {page} | Inserted {inserted}")
-
-            page += 1
-            start += 20
-            time.sleep(1)
-            
-# #######################################################################qr code scan and convert findout certficate_number ###############
-
-INPUT_CSV  = "cullen_diamonds.csv"
-OUTPUT_CSV = "cullen_cert2_diamonds.csv"
-
-MAX_WORKERS = 10
-CPU_LIMIT = 80
-
-detector = cv2.QRCodeDetector()
-session = requests.Session()
-session.mount("https://", HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS))
-
-
-def wait_for_cpu():
-    while psutil.cpu_percent(interval=1) > CPU_LIMIT:
-        time.sleep(2)
-
-
-def get_certificate(diamond_id):
-    try:
-        url = f"https://diamonds.cullenjewellery.com/{diamond_id}/cert.jpeg"
-        r = session.get(url, timeout=10)
+        r = session.post(URL, headers=HEADERS, data=json.dumps(payload))
         if r.status_code != 200:
-            return diamond_id, None
+            print("Blocked, retrying...")
+            time.sleep(15)
+            continue
 
-        img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_GRAYSCALE)
-        text, _, _ = detector.detectAndDecode(img)
+        stones = r.json().get("stones", [])
+        if not stones:
+            print("Finished downloading.")
+            break
+        new_ids = []
 
-        return diamond_id, text.split("=")[-1] if text else None
-    except:
-        return diamond_id, None
+        with open(CSV_FILE, "a" if file_exists else "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDS)
 
+            if not file_exists:
+                writer.writeheader()
+                file_exists = True
 
-def process_certificates():
-    df = pd.read_csv(INPUT_CSV)
-    ids = df["id"].astype(str).tolist()
+            for s in stones:
+                d = s.get("info")
+                if not d:
+                    continue
 
-    df.iloc[0:0].assign(certificate_number="").to_csv(OUTPUT_CSV, index=False)
+                did = str(d.get("id"))
+                if did in existing_ids:
+                    continue
 
-    batch = 500
+                writer.writerow({
+            "id": did,
+            "price": d.get("price"),
+            "dimensions": d.get("dimensions"),
+            "carat": d.get("carat"),
+            "length": d.get("length"),
+            "width": d.get("width"),
+            "depth": d.get("depth"),
+            "table": d.get("table"),
+            "dw_ratio": d.get("dw_ratio"),
+            "lw_ratio": d.get("lw_ratio"),
+            "tw_ratio": d.get("tw_ratio"),
+            "is_wide": d.get("is_wide"),
+            "shape": d.get("shape"),
+            "cut": d.get("cut"),
+            "colour": d.get("colour"),
+            "colour_rank": d.get("colour_rank"),
+            "colour_intensity": d.get("colour_intensity"),
+            "clarity": d.get("clarity"),
+            "clarity_rank": d.get("clarity_rank"),
+            "polish": d.get("polish"),
+            "symm": d.get("symm"),
+            "culet": d.get("culet"),
+            "lab": d.get("lab"),
+            "certificate_number": None
+        })
+                existing_ids.add(did)
+                new_ids.append(did)
 
-    with ThreadPoolExecutor(MAX_WORKERS) as pool:
-        for i in range(0, len(ids), batch):
-            wait_for_cpu()
+        print(f"Page {page} | Inserted {len(new_ids)}")
 
-            chunk = ids[i:i+batch]
-            results = dict(pool.map(get_certificate, chunk))
-
-            out = df[df["id"].astype(str).isin(chunk)].copy()
-            out["certificate_number"] = out["id"].astype(str).map(results)
-            out.to_csv(OUTPUT_CSV, mode="a", header=False, index=False)
-
-            print(f"Batch {i//batch+1} completed")
+        # inserted = save_diamonds(stones, writer, existing_ids)
+        time.sleep(1)
+        
+        # print(f"Page {page} | Inserted {inserted}")
+        process_certificates()
+        time.sleep(1)
+        page += 1
+        start += 20
+        time.sleep(1)
             
 if __name__ == "__main__":
-    # fetch_all_diamonds()      
-    process_certificates()   
+    fetch_all_diamonds()      
+    # process_certificates()   

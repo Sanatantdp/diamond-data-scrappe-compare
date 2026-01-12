@@ -59,7 +59,7 @@ payload = {
     "preferred_currency": "AUD",
     "current_tab": "result_tab",
     "fetch_count": "true",
-    "token": "b81b544c.p-ul7g-dKLlAY6M8HAN673JY_9LvPFge5h4pVrioEJk.9Z7In2r_XOsKCMB3d2ApmyFqir28URQvtVlOBOqcQ6_FhfaDaN5f_is6wA"
+    "token": "ed2461daa12ca6914b563f605ee92f6c.H8F-uy24BMgGhWujcQfmcdpLe8h6UNlFNRbxAO6lHo4.bI4p8Rv2S4x3ykbtPEq0IpIvJIklKa0gXmLGTJj_bLZ1uCT8dNI8jkDqMg"
 }
 
 FIELDS = [
@@ -71,10 +71,6 @@ FIELDS = [
     "nd_percentage_discount","price","manual_price","symbol_currency","active"
 ]
 
-
-# =============================
-# Load existing certs
-# =============================
 def load_existing_certificates():
     certs = set()
     if os.path.exists(CSV_FILE):

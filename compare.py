@@ -28,7 +28,7 @@ def compare_with_tdp(
         "color": "t_d_color",
         "clarity": "t_d_clarity",
         "certificate_number": "certificate_number",
-        "final_price_usd": "PC Price USD"
+        "final_price_usd": "ROA Price USD"
     })
 
     tdp["certificate_number"] = tdp["certificate_number"].astype(str)
@@ -44,7 +44,7 @@ def compare_with_tdp(
             "t_d_color",
             "t_d_clarity",
             #  'url',
-            "PC Price USD",
+            "ROA Price USD",
             vendor_price_col,
            
         ]
@@ -61,8 +61,8 @@ def compare_with_tdp(
         
     })
 
-    final["PC Price USD"] = final["PC Price USD"].astype(float).round(0)
-    final[f"PC -30% USD"] = (final["PC Price USD"] * tdp_discount).round(0)
+    final["ROA Price USD"] = final["ROA Price USD"].astype(float).round(0)
+    final[f"ROA -30% USD"] = (final["ROA Price USD"] * tdp_discount).round(0)
     # final[f"{vendor_name} Price USD"] = final[f"{vendor_name} Price USD"].str.replace(',','').astype(int)
     final[f"{vendor_name} Price USD"] = (
     final[f"{vendor_name} Price USD"]
@@ -71,8 +71,8 @@ def compare_with_tdp(
     .apply(lambda x: int(float(x)) if x.replace(".","",1).isdigit() else 0)
 )
 
-    final[f"Compare ({vendor_name} - PC)USD"] = (
-        final[f"{vendor_name} Price USD"] - final[f"PC -30% USD"]
+    final[f"Compare ({vendor_name} - ROA)USD"] = (
+        final[f"{vendor_name} Price USD"] - final[f"ROA -30% USD"]
     ).round(2)
     # final 
     
@@ -81,9 +81,9 @@ def compare_with_tdp(
 
     styled = final.style.apply(
         highlight_loss,
-        subset=[f"Compare ({vendor_name} - PC)USD"]
+        subset=[f"Compare ({vendor_name} - ROA)USD"]
     )
-    styled.to_excel(f"PC_{vendor_name}_compare.xlsx", index=False)
+    styled.to_excel(f"ROA_{vendor_name}_compare.xlsx", index=False)
 
     print(f"{vendor_name} comparison created")
     print(final.describe())
@@ -91,4 +91,4 @@ def compare_with_tdp(
     return final
 
 
-compare_with_tdp(tdp_csv='tdp_usd.csv',vendor_csv='loosegrowndiamond.csv',vendor_name='Loosegrown',vendor_price_col='price',vendow_certi_col='sku')
+compare_with_tdp(tdp_csv='tdp.csv',vendor_csv='gs_diamonds1.csv',vendor_name='GS',vendor_price_col='price_aud',vendow_certi_col='cert_no')
